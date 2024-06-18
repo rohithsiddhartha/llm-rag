@@ -121,6 +121,9 @@ for course in documents_file:
         documents.append(doc)
 ```
 
+
+
+
 Now we'll index these documents with elastic search
 
 First initiate the connection and check that it's working:
@@ -131,4 +134,29 @@ from elasticsearch import Elasticsearch
 es = Elasticsearch("http://localhost:9200")
 es.info()
 ```
+
+You should see the same response as earlier with `curl`.
+
+Before we can index the documents, we need to create an index (an index in elasticsearch is like a table in a "usual" databases):
+
+
+index_settings = {
+    "settings": {
+        "number_of_shards": 1,
+        "number_of_replicas": 0
+    },
+    "mappings": {
+        "properties": {
+            "text": {"type": "text"},
+            "section": {"type": "text"},
+            "question": {"type": "text"},
+            "course": {"type": "keyword"} 
+        }
+    }
+}
+
+index_name = "course-questions"
+response = es.indices.create(index=index_name, body=index_settings)
+
+response
 
