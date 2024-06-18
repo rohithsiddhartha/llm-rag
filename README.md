@@ -1,5 +1,6 @@
 # llm-rag
 
+
 We will use pipenv for dependency management. Let's install it: 
 
 ```bash
@@ -159,4 +160,240 @@ index_name = "course-questions"
 response = es.indices.create(index=index_name, body=index_settings)
 
 response
+
+
+Now we're ready to index all the documents:
+
+```python
+from tqdm.auto import tqdm
+
+for doc in tqdm(documents):
+    es.index(index=index_name, document=doc)
+```
+
+
+## Retrieving the docs
+
+```python
+user_question = "How do I join the course after it has started?"
+
+search_query = {
+    "size": 5,
+    "query": {
+        "bool": {
+            "must": {
+                "multi_match": {
+                    "query": user_question,
+                    "fields": ["question^3", "text", "section"],
+                    "type": "best_fields"
+                }
+            },
+            "filter": {
+                "term": {
+                    "course": "data-engineering-zoomcamp"
+                }
+            }
+        }
+    }
+}
+```
+
+This query:
+
+* Retrieves top 5 matching documents.
+* Searches in the "question", "text", "section" fields, prioritizing "question".
+* Matches user query "How do I join the course after it has started?".
+* Shows results only for the "data-engineering-zoomcamp" course.
+
+Let's see the output:
+
+```python
+response = es.search(index=index_name, body=search_query)
+
+for hit in response['hits']['hits']:
+    doc = hit['_source']
+    print(f"Section: {doc['section']}\nQuestion: {doc['question']}\nAnswer: {doc['text']}\n\n")
+```
+
+## Cleaning it
+
+We can make it cleaner by putting it into a function:
+
+```python
+def retrieve_documents(query, index_name="course-questions", max_results=5):
+    es = Elasticsearch("http://localhost:9200")
+    
+    search_query = {
+        "size": max_results,
+        "query": {
+            "bool": {
+                "must": {
+                    "multi_match": {
+                        "query": query,
+                        "fields": ["question^3", "text", "section"],
+                        "type": "best_fields"
+                    }
+                },
+                "filter": {
+                    "term": {
+                        "course": "data-engineering-zoomcamp"
+                    }
+                }
+            }
+        }
+    }
+    
+    response = es.search(index=index_name, body=search_query)
+    documents = [hit['_source'] for hit in response['hits']['hits']]
+    return documents
+```
+
+And print the answers:
+
+```python
+user_question = "How do I join the course after it has started?"
+
+response = retrieve_documents(user_question)
+
+for doc in response:
+    print(f"Section: {doc['section']}\nQuestion: {doc['question']}\nAnswer: {doc['text']}\n\n")
+```
+
+# Generation - Answering questions
+
+Now let's do the "G" part - generation based on the "R" output
+
+## OpenAI
+
+Today we will use OpenAI (it's the easiest to get started with). In the course, we will learn how to use open-source models 
+
+Make sure we have the SDK installed and the key is set.
+
+This is how we communicate with ChatGPT3.5:
+
+```python
+from openai import OpenAI
+
+client = OpenAI()
+
+response = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=[{"role": "user", "content": "What's the formula for Energy?"}]
+)
+print(response.choices[0].message.content)
+```
+
+## Building a Prompt
+
+Now let's build a prompt. First, we put all the 
+documents together in one string:
+
+
+```python
+context_docs = retrieve_documents(user_question)
+
+context = ""
+
+for doc in context_docs:
+    doc_str = f"Section: {doc['section']}\nQuestion: {doc['question']}\nAnswer: {doc['text']}\n\n"
+    context += doc_str
+
+context = context.strip()
+print(context)
+```
+
+Now build the actual prompt:
+
+```python
+prompt = f"""
+You're a course teaching assistant. Answer the user QUESTION based on CONTEXT - the documents retrieved from our FAQ database. 
+Only use the facts from the CONTEXT. If the CONTEXT doesn't contan the answer, return "NONE"
+
+QUESTION: {user_question}
+
+CONTEXT:
+
+{context}
+""".strip()
+```
+
+Now we can put it to OpenAI API:
+
+```python
+response = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=[{"role": "user", "content": prompt}]
+)
+answer = response.choices[0].message.content
+answer
+```
+
+Note: there are system and user prompts, we can also experiment with them to make the design of the prompt cleaner.
+
+## Cleaning
+
+Now let's put everything together in one function:
+
+
+```python
+def build_context(documents):
+    context = ""
+
+    for doc in documents:
+        doc_str = f"Section: {doc['section']}\nQuestion: {doc['question']}\nAnswer: {doc['text']}\n\n"
+        context += doc_str
+    
+    context = context.strip()
+    return context
+
+
+def build_prompt(user_question, documents):
+    context = build_context(documents)
+    return f"""
+You're a course teaching assistant.
+Answer the user QUESTION based on CONTEXT - the documents retrieved from our FAQ database.
+Don't use other information outside of the provided CONTEXT.  
+
+QUESTION: {user_question}
+
+CONTEXT:
+
+{context}
+""".strip()
+
+def ask_openai(prompt, model="gpt-3.5-turbo"):
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    answer = response.choices[0].message.content
+    return answer
+
+def qa_bot(user_question):
+    context_docs = retrieve_documents(user_question)
+    prompt = build_prompt(user_question, context_docs)
+    answer = ask_openai(prompt)
+    return answer
+```
+
+Now we can ask it:
+
+```python
+qa_bot("I'm getting invalid reference format: repository name must be lowercase")
+
+qa_bot("I can't connect to postgres port 5432, my password doesn't work")
+
+qa_bot("how can I run kafka?")
+```
+
+
+# What's next
+
+* Use Open-Souce
+* Build an interface, e.g. streamlit
+* Deploy it
+
+
+
+Refer to https://github.com/alexeygrigorev/llm-rag-workshop/tree/main for full readme for the entire project
 
