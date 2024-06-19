@@ -396,4 +396,3 @@ qa_bot("how can I run kafka?")
 
 
 Refer to https://github.com/alexeygrigorev/llm-rag-workshop/tree/main for full readme for the entire project
-
